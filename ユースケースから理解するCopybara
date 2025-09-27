@@ -1,0 +1,184 @@
+# Copybaraで理解する `git.mirror` / `core.replace` / `git.origin` の実践と概念解説
+
+## はじめに
+
+複数の Git リポジトリをまたいでコードを管理するとき、「差分をどうやって同期するか」「OSS 公開用にどうクリーンアップするか」という課題が出てきます。  
+Google が開発する **Copybara** は、それらを自動化する強力なツールです。
+
+本記事では **ユースケース → 実装例 → 概念解説** の順で、Copybara の代表的な機能
+
+- `git.mirror`
+    
+- `git.origin`
+    
+- `core.replace`
+
+を説明していきます。
+
+---
+
+## ユースケース別の使い方
+
+### 1. 単純なフォークの追従（`git.mirror`）
+
+OSS プロジェクトをフォークしている場合、「上流に追従したい」「手元の fork に反映したい」ことがよくあります。  
+この場合に便利なのが `git.mirror` です。
+これだけで **上流と fork の双方向同期** が可能になります。  
+ただし「置換」や「除外」はできないので、**純粋なコピー専用**と考えるのがコツです。
+
+```python
+git.mirror(
+    name = "mirror_upstream",
+    origin = "https://github.com/upstream/project.git",
+    destination = "git@github.com:myfork/project.git",
+)
+```
+
+#### パラメータ・構成要素の解説
+
+- **`name`**
+    
+    - Copybara 内でこのミラー定義を識別するための名前。
+        
+    - 実行時には `copybara mirror mirror_upstream` のように呼び出せます。
+        
+    - 複数の mirror を設定する場合、この名前で区別します。
+        
+- **`origin`**
+    
+    - コピー元となる Git リポジトリの URL。
+        
+    - ここでは **上流 OSS プロジェクト** を指定しています。
+        
+    - 例: `https://github.com/upstream/project.git` が設定されている場合、GitHub 上流プロジェクトの `main` ブランチが同期対象。
+        
+- **`destination`**
+    
+    - コピー先となる Git リポジトリの URL。
+        
+    - 通常は **自分の fork** や **社内リポジトリ** を指定します。
+        
+    - 例: `git@github.com:myfork/project.git`  が設定されている場合、SSH 認証でアクセスし、自分の fork に push できるようにする。
+
+
+---
+
+### 2. 社内リポジトリから OSS 公開用への変換（`git.origin` + `core.replace`）
+
+社内用コードをそのまま OSS に出すと、内部 URL や秘密情報が混じることがあります。  
+この場合は **コピー元を `git.origin`、コピー先を `git.destination` に明示**し、その間に `core.replace` を挟みます。
+これにより、「社内のホスト名 → 公開用ホスト名」、「著作権表記 → OSS 向け表記」といった差し替えが自動で行われます。
+
+```python
+core.workflow(
+    name = "oss_publish",
+    origin = git.origin(
+        url = "ssh://git@corp.example.com/internal/project.git",
+        ref = "main",
+    ),
+    destination = git.destination(
+        url = "git@github.com:opensource/project.git",
+        push = "main",
+    ),
+    transformations = [
+        core.replace(before = "internal.example.com", after = "public.example.org"),
+        core.replace(before = "© 2025 CompanyX", after = "© 2025 OpenSource Community"),
+    ],
+)
+```
+
+#### パラメータ・構成要素の解説
+
+- **`core.workflow`**
+    
+    - Copybara の中心となる「変換処理の定義ブロック」。
+        
+    - `origin`（コピー元）と `destination`（コピー先）、さらにその間で実行する `transformations` をまとめて指定します。
+
+- **`git.origin`**
+    
+    - コピー元リポジトリを定義します。
+        
+    - `url`: Git リポジトリの場所（ここでは社内 Git サーバの SSH アクセス URL）。
+        
+    - `ref`: コピー対象のブランチやタグ。多くの場合 `main` や `master` を指定。
+        
+    - 例: `ssh://git@corp.example.com/internal/project.git` → 社内の「internal/project」リポジトリをソースにする。
+        
+
+- **`git.destination`**
+    
+    - コピー先リポジトリを定義します。
+        
+    - `url`: GitHub 上の公開リポジトリ URL。
+        
+    - `push`: 変換後に push するブランチ名。
+        
+    - 例: `git@github.com:opensource/project.git` → 公開用 OSS リポジトリの `main` に push。
+        
+
+- **`transformations`**
+    
+    - コピー中に適用する「変換ルール」のリスト。
+        
+    - 複数の `core.replace` や `core.move` などを並べて順番に実行できます。
+
+- **`core.replace`**
+    
+    - ファイル中の文字列を置換するシンプルな変換。
+        
+    - `before`: 検索対象の文字列や正規表現。
+        
+    - `after`: 置換後の文字列。
+        
+    - 複数指定すると上から順に適用される。
+
+
+
+---
+
+### 3. 特定のファイルだけ同期する（フィルタ付き）
+
+「コードは公開できないが、ドキュメントだけ別リポジトリへ公開したい」というケースもあります。
+こうすれば「`docs/` フォルダのみ」外部公開ができます。
+
+```python
+core.workflow(
+    name = "docs_sync",
+    origin = git.origin(
+        url = "ssh://git@corp.example.com/internal/project.git",
+        ref = "main",
+    ),
+    destination = git.destination(
+        url = "git@github.com:myorg/docs.git",
+        push = "main",
+    ),
+    transformations = [
+        # docs/ 配下のみコピー
+        core.exclude_paths(["**", "!docs/**"]),
+    ],
+)
+```
+
+#### パラメータ・構成要素の解説
+- **`core.exclude_paths`**
+    
+    - ファイルパスに基づいて **コピー対象から除外するパターンを指定** する。
+    - ワークフロー実行時に「どのファイルを含める／除外するか」を制御できる。
+        
+    - パターンの例
+	    - `"**"` : すべてのファイル・ディレクトリをマッチさせる
+	    - `"!docs/**"` : `docs/` フォルダ以下を除外対象から外す（つまり残す）
+
+---
+## 最後にまとめ
+
+- **フォークの単純追従** → `git.mirror`
+    
+- **社内コードを OSS 用に変換** → `git.origin` + `core.replace`
+    
+- **特定ファイルだけ公開** → フィルタを追加
+    
+
+Copybara は「コピーの定義（origin/destination）」と「途中の変換（replace/transform）」を組み合わせる設計です。  
+一度パターンを理解すれば、社内 ↔ OSS、モノレポ ↔ サブレポなど、あらゆるシナリオに応用可能です。
