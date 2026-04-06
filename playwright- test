@@ -1,0 +1,72 @@
+作成済みのマルチページWebアプリに対して、
+Playwrightを使用したE2Eテストを作成してください。
+
+---
+
+## 前提
+
+- アプリは http://localhost:3000 で起動済み
+- 複数ページ構成（index.html / ai.html など）
+- ナビゲーションバーあり
+
+---
+
+## テストファイル
+
+test/test.js を作成
+
+- JavaScriptで記述
+- Playwright（chromium）を使用
+
+---
+
+## テスト内容（重要）
+
+1. ブラウザを起動（headless: false）
+2. http://localhost:3000/index.html にアクセス
+
+---
+
+3. トップページ確認
+- 「開発は、次のステージへ。」が表示されていること
+
+---
+
+4. ナビゲーション操作
+- 「AI開発」をクリック
+- ai.html に遷移すること
+
+---
+
+5. AIページ確認
+- 「AI開発アシスタント」が表示されていること
+- 「Cline」という文字が表示されていること
+
+---
+
+## 判定
+
+すべて成功：
+console.log("✅ Test Passed")
+
+失敗：
+console.log("❌ Test Failed")
+
+---
+
+## 実装要件
+
+- try/catchでエラーハンドリング
+- エラー内容をconsoleに出力
+- 適切なwaitを入れる（waitForTimeoutなど）
+
+---
+
+## セットアップ説明
+
+以下も出力：
+
+- npm install -D playwright
+- npx playwright install
+- 実行方法：
+  node test/test.js
