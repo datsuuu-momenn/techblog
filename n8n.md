@@ -69,3 +69,70 @@ HTTP / SSH / Redmine / Keycloak
 另外别把它和官方 npm 包 @n8n/utils 搞混。后者是 n8n 当前仍在维护的 TypeScript utility package，用于 n8n 前后端代码共享工具函数，并不是 VS Code Extension。
 
 如果你现在的目标是“我想用 VS Code 正规开发自己的 n8n workflow，而不是开发 n8n 源码”，那我可以继续给你筛一下 2026 年现在还在维护、真正适合 Workflow 开发的 VS Code 扩展。
+
+
+
+对，你说的是 n8n Utils 里的 “Focus on Controller Endpoints View”。这个功能不是拿来开发 workflow 的，而是给你阅读 / 开发 n8n 本体后端源码用的。
+
+它的作用是把 n8n 后端的 *.controller.ts 里的 API endpoint 集中显示出来。官方 README 把它叫 Controller endpoint navigator，并明确说明只支持 *.controller.ts。
+
+例如 n8n 源码里可能有类似：
+
+@RestController('/credentials')
+export class CredentialsController {
+  @Get('/')
+  getCredentials() {}
+  @Post('/')
+  createCredential() {}
+  @Delete('/:id')
+  deleteCredential() {}
+}
+
+你不用自己到处搜 controller，而是在 VS Code 里执行：
+
+Ctrl + Shift + P
+↓
+n8n-utils: Navigate to controller endpoint
+
+或者你看到的：
+
+n8n-utils: Focus on Controller Endpoints View
+
+它会把焦点切到侧边栏里的 n8n controllers View，然后你可以按：
+
+Controller
+├─ CredentialsController
+│  ├─ GET    /credentials
+│  ├─ POST   /credentials
+│  └─ DELETE /credentials/:id
+│
+├─ WorkflowController
+│  ├─ GET    /workflows
+│  ├─ POST   /workflows
+│  └─ ...
+
+点击其中一个 endpoint，就会直接跳到对应的 TypeScript controller 源码。
+
+关键是你必须打开 n8n 源码仓库。 比如：
+
+git clone https://github.com/n8n-io/n8n.git
+cd n8n
+code .
+
+然后 n8n Utils 才能扫描 n8n 的 *.controller.ts。如果你打开的只是你自己的 workflow 项目：
+
+my-n8n-workflows/
+├── workflow1.json
+├── workflow2.json
+└── ...
+
+这个 View 基本没东西可看。
+
+所以这也印证了我们前面说的：
+
+n8n Utils 主要是给“开发 n8n 本体”的人用的，不是给“用 n8n 开发 workflow”的人用的。
+
+如果你的目标是 读 n8n 源码、研究 n8n REST API 后端是怎么实现的，这个 Controller Endpoints View 反而非常方便；如果目标是 VS Code + AI Agent 开发 workflow，还是前面那个 n8n as code 更对路。
+
+n8n Utils GitHub⁠￼
+
