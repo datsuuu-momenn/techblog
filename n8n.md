@@ -1,0 +1,71 @@
+啊，你说的是 n8n utils 这个 VS Code Extension。这个和我刚才说的 n8n as code 完全不是一个定位。
+
+n8n utils - VS Code Marketplace⁠￼
+n8n-utils GitHub⁠￼
+
+它主要是给开发 n8n 本身 / 开发 n8n Node的人用的工具集，而不是用来画普通 workflow 的。
+
+它主要有这些能力：
+
+功能	干什么
+Launch n8n	VS Code 里直接启动 n8n
+Hot Reload	修改 Node 代码后自动重载
+Node Params	浏览 Node 的参数树并跳转源码
+Controller Navigator	浏览 n8n 后端 controller / endpoint
+Env Vars Tooltip	鼠标放到环境变量上直接看值和状态
+Stored Workflows	查看本地 SQLite 中保存的 workflow
+Node Stats	看 Node 使用统计，但这是 n8n 团队内部功能
+
+例如你在开发一个自己的 Node：
+
+VS Code
+│
+├─ MyNode.node.ts
+│     ↑
+│   修改代码
+│
+├─ n8n utils
+│     ↓ hot reload
+│
+└─ n8n
+      ↓
+   localhost:5678
+      ↓
+浏览器测试 MyNode
+
+最有用的是 Command Palette 里的：
+
+Ctrl + Shift + P
+n8n-utils: Launch n8n in VSCode
+n8n-utils: Navigate to node parameter
+n8n-utils: Navigate to controller endpoint
+
+尤其是 Node parameter navigator。如果一个 Node 有几十个配置参数，你可以在侧边栏看到参数树，然后直接跳到对应的 *.node.ts / *Description.ts。Controller navigator 则更偏向你在研究 n8n 源码本身的时候用。
+
+不过有个很重要的问题：这个扩展很老了。Marketplace 当前显示的版本是 1.1.2，最后更新在 2023 年 5 月；2025 年 n8n 社区里也已经有人反馈它似乎处于 abandoned 状态、Launch 功能在其环境里不可用。
+
+所以如果你的目的只是：
+
+我自己用 n8n
+↓
+做 Workflow
+↓
+Code Node
+↓
+HTTP / SSH / Redmine / Keycloak
+
+基本不需要 n8n utils。
+
+它真正适合的是：
+
+我要开发 n8n 源码
+        或
+我要开发 Custom / Community Node
+        ↓
+      VS Code
+        ↓
+    n8n utils
+
+另外别把它和官方 npm 包 @n8n/utils 搞混。后者是 n8n 当前仍在维护的 TypeScript utility package，用于 n8n 前后端代码共享工具函数，并不是 VS Code Extension。
+
+如果你现在的目标是“我想用 VS Code 正规开发自己的 n8n workflow，而不是开发 n8n 源码”，那我可以继续给你筛一下 2026 年现在还在维护、真正适合 Workflow 开发的 VS Code 扩展。
