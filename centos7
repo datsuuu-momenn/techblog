@@ -1,0 +1,39 @@
+如果你说的是 “因为 EL7/CentOS 7 太老，上游 repo 位置变化了，那公司自己的 repo 需要怎么特殊处理？”——是的，通常需要，而且关键点在公司 repo 的上游配置，不是 Dockerfile。
+
+如果你们上游实际是 CentOS 7，最大的变化是 CentOS 7 已经结束生命周期，原来的常规 mirror 体系不能再按“还在正常维护的发行版”来理解。一般要把上游改成 CentOS Vault/归档源，也就是固定到 7.9.2009 的历史包，而不是继续追普通 mirror。这样你们内部 Nexus/Artifactory 才能继续代理或同步诸如 libxcb 这类老 RPM。
+
+概念上会从：
+
+以前
+公司 Repo
+   ↓
+mirror.centos.org / mirrorlist
+   ↓
+CentOS 7 packages
+
+变成类似：
+
+现在
+公司 Repo
+   ↓
+CentOS 7 Vault / Archive
+   ↓
+7.9.2009 固定内容
+
+这类处理有两个特点：包还能拿到，但不会再获得正常的后续安全更新。所以如果只是为了让老镜像继续 build，这可以作为过渡方案；但长期最好把 base image 升到 EL8/EL9。CentOS 7 已在 2024 年结束生命周期。
+
+如果你们实际用的不是 CentOS，而是 RHEL 7.9，情况又不一样。RHEL 7 在 2024-06-30 结束常规 Maintenance Support，目前处于 Extended Life Phase。已有历史内容仍可访问，但要继续获得部分安全修复和维护，需要 RHEL 7 ELS；Red Hat 当前说明 RHEL 7 ELS 支持到 2029-05-31，而且只针对最后一个 minor release，也就是 7.9。
+
+所以你们公司的 repo 管理员真正需要确认的是这三件事：
+
+1. 上游到底是 CentOS 7 还是 RHEL 7。
+2. 如果是 CentOS 7，是否已经把 proxy/sync 的 URL 从旧 mirror 切到了归档/Vault。
+3. 如果是 RHEL 7，公司的 Red Hat subscription/content source 是否还能提供 7.9 内容；如果需要新的安全修复，是否购买并正确同步了 ELS 内容。Red Hat 也特别说明，使用 Satellite 时，ELS content 必须正确同步并发布给 RHEL 7 系统。
+
+而你现在这个 libxcb 问题，不一定需要 ELS。libxcb 是早就存在的历史基础包；哪怕不买 ELS，只要公司的 EL7 历史 repo 配置完整，原则上也应该能拿到它。
+
+所以我会先让 repo 管理员查一句非常具体的话：
+
+我们公司 EL7 repo 的 upstream 现在指向哪里？能不能检索到 libxcb.x86_64？
+
+如果他们能看到上游有 libxcb、公司 repo 没有，那就是同步/代理/过滤规则问题；如果上游本身已经是失效的旧 CentOS mirror，那就需要改成 archive/vault。这比从 Java 那头折腾有效得多。
