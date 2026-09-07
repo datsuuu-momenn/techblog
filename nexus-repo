@@ -1,0 +1,109 @@
+那这个信息就非常关键了。如果你已经确认：
+
+DSS repo       ❌ 没有 libxcb
+某个 RHEL repo ✅ 有 libxcb
+
+那么现在基本不用再怀疑“外部 EL7 已经拿不到 libxcb”了。
+
+问题已经缩小成：
+
+                    Nexus
+                      │
+          ┌───────────┴───────────┐
+          ↓                       ↓
+       DSS repo                RHEL repo
+          ❌                       ✅
+       libxcb                  libxcb
+          │
+          ↓
+   Docker / yum
+          ↓
+priority=1
+          ↓
+依赖解析失败
+
+这也和你之前那张历史记录非常对得上。
+
+现在先确认一个东西：DSS 是不是 Group
+
+进入 Nexus：
+
+Administration
+    ↓
+Repositories
+    ↓
+DSS
+
+看它的 Type / Recipe。
+
+如果是：
+
+yum (group)
+
+那事情可能非常简单。
+
+继续看：
+
+Member repositories
+
+假设现在是：
+
+DSS (group)
+├── company-rpm
+├── old-rhel
+└── xxx
+
+而你刚才找到 libxcb 的那个：
+
+rhel-xxx  ← 有 libxcb
+
+并不在 DSS 的 Members 里面，那么这就是一个非常明确的候选原因。
+
+理想结构可能应该是：
+
+DSS (group)
+├── company-rpm
+├── ...
+└── rhel-xxx       ← 有完整依赖
+       ↓
+     libxcb ✅
+
+然后客户端仍然只访问：
+
+Docker
+ ↓
+DSS
+
+不需要让每个 Dockerfile 自己知道后面有多少 repo。
+
+但先别马上把 RHEL repo 加进去
+
+因为你是管理员，我建议咱们第一次处理谨慎一点。
+
+先确认：
+
+① DSS 是 group 吗？
+
+② 那个有 libxcb 的 RHEL repo 是 proxy、hosted 还是另一个 group？
+
+③ 它现在是不是 DSS 的 Member？
+
+如果答案是：
+
+DSS = yum group
+RHEL = yum proxy
+RHEL 不在 DSS members
+
+那我基本就会建议你：
+
+评估把这个 RHEL proxy 加入 DSS group，而不是手工上传 libxcb.rpm。
+
+因为你真正缺的不是“一个 libxcb”，而是 DSS 的完整依赖来源。
+
+还有一点非常重要：你之前提到：
+
+priority=1
+
+这个 priority=1 是 Docker/Linux 侧 .repo 文件的 Yum 优先级，和 Nexus Group 里面 Member 的顺序不是同一个概念，咱们后面不要把这两个混在一起。
+
+你现在看一下 DSS 的 Type 和 Member repositories。如果是 Group，把 Member 名称贴出来（公司名字打码），我就可以告诉你下一步该不该把那个 RHEL repo 加进去。
