@@ -1,0 +1,146 @@
+对，你要的不是“EL7 整体怎么处理”的方案，而是专门比较 “”。Nexus 里的 DSS Repo 到底可以怎么改
+
+我会把方案收敛成这 4 个 repo 修改方向：
+
+方案	Nexus 修改方式	DSS 对客户端	优点	风险/缺点	推荐
+A. DSS Group 加入现有 RHEL7 Repo	把已有 RHEL7 repo 加为 DSS Group Member	不变	最简单；自动补全依赖；Docker 不改	要检查同名 RPM/版本覆盖	⭐⭐⭐⭐⭐
+B. 给 DSS 新建 RHEL7 Proxy	新建专用 rhel7-proxy，再加入 DSS Group	不变	边界清晰；以后好维护	要正确配置 upstream	⭐⭐⭐⭐⭐
+C. 建 RHEL7 Archive/Hosted Repo	把需要保留的 EL7 RPM 固定存入 Hosted，再加入 DSS	不变	最稳定、可重复构建、不依赖外部	初期整理工作较多	⭐⭐⭐⭐
+D. 直接扩充 DSS Hosted 内容	手动向现有 DSS 上传缺失 RPM	不变	最快	容易“缺一个补一个”，依赖不完整	⭐⭐
+
+其中 A 和 B 最值得比较。
+
+A：把现有 RHEL7 Repo 加入 DSS
+
+如果现在 Nexus 已经是：
+
+Nexus
+│
+├─ DSS (Group)
+│   ├─ internal
+│   └─ old-el7
+│
+└─ RHEL7 Repo
+    └─ libxcb ✅
+
+直接调整成：
+
+DSS (Group)
+├─ internal
+├─ old-el7
+└─ RHEL7 Repo  ← 加进来
+
+客户端完全不用知道：
+
+Docker
+  ↓
+dss.repo
+  ↓
+DSS Group
+  ↓
+自动从各 Member 找依赖
+
+如果你们那个 RHEL repo 本来就是公司正式维护的，我目前最推荐这个。
+
+⸻
+
+B：专门新建一个 RHEL7 Proxy
+
+如果现有 RHEL repo 不适合直接给 DSS 使用，那么可以：
+
+External RHEL7 Source
+        ↓
+rhel7-legacy-proxy   ← 新建
+        ↓
+DSS Group
+        ↓
+Docker
+
+这样 DSS 的结构会非常清楚：
+
+DSS
+├─ company-hosted
+├─ existing-repo
+└─ rhel7-legacy-proxy
+
+以后看到：
+
+libxcb
+libstdc++
+libX11
+...
+
+这些基础依赖都知道应该从哪里来。
+
+⸻
+
+C：做一个冻结的 EL7 Archive
+
+考虑到 EL7 已经是遗留环境，其实这个方案长期挺漂亮：
+
+Nexus
+└─ rhel7-legacy-hosted
+    ├─ java-1.8.0-openjdk...
+    ├─ libX11...
+    ├─ libxcb...
+    ├─ libstdc++...
+    └─ ...
+          ↓
+       DSS Group
+
+不再追求：
+
+DSS → Internet → 永远更新
+
+而是：
+
+RHEL 7.9 最终需要的完整 RPM
+             ↓
+         固定下来
+             ↓
+      Nexus 长期保存
+
+这样几年后重新 build 旧镜像也不会突然坏。
+
+⸻
+
+D：直接给 DSS 补 RPM
+
+就是你刚才说的“扩增 DSS 内容”：
+
+DSS
+├─ Java
+├─ libX11
+├─ libxcb ← 手工补
+└─ ...
+
+能解决，但我把它放最后。
+
+因为今天：
+
+libxcb ❌
+
+明天可能：
+
+libXau ❌
+
+后天：
+
+libstdc++ ❌
+
+会变成一直补洞。
+
+⸻
+
+所以针对你现在已经确认的情况：
+
+DSS       → libxcb ❌
+RHEL Repo → libxcb ✅
+
+我会优先调查：
+
+能不能直接把这个现有 RHEL7 Repo 作为 DSS Group 的 Member。
+
+如果可以，A 是最小且最合理的 repo 修改；如果现有 RHEL repo 不适合直接加入，再考虑 B；如果公司计划让 EL7 再活很多年，就值得进一步做 C。
+
+你要的话，我可以把刚才那个 MD 重写成纯“Nexus Repo 修改方案比较版”，把 Docker/EL7 升级那些无关内容全部删掉。
