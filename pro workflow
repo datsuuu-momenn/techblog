@@ -1,0 +1,111 @@
+本指南整理 2026-09-19 对话中的安装路线。状态：方案与命令尚未在用户实际环境执行验证；不要把建议当作已安装成功的记录。
+
+## 1. 环境与已知问题
+
+- Windows Thin Client：部分环境在重启后重置，用户目录 `C:\Users\<username>` 可持久化；期望避免每天重复安装。
+- Claude Code 已安装并可日常使用。Node 通过 fnm 管理；此前截图显示 Node v24.14.1，pnpm v10.33.4。实际执行时以当前命令结果为准。
+- Pro Workflow 源码已导入公司 GitLab。GitHub 相关外部资源通过 Nexus Raw Proxy 获取，不宜假设 Claude Code 的 Marketplace 安装自动使用 Nexus。
+- npm 包已能通过 Nexus npm Registry 下载；`better-sqlite3` 原生模块安装遇到问题，可能是预编译二进制文件下载失败后回退到 `node-gyp`；尚需日志验证，不能断定只有网络问题。
+- 本地编译受阻：Windows node-gyp 寻找 Visual Studio Build Tools；目前 Build Tools 未确认安装完整，VS 安装器的外部访问可能受限。MSYS2 GCC 不能直接替代标准 Windows node-gyp 的 VS 工具链。
+
+## 2. 建议架构
+
+公司 GitLab 源码 → 用户持久目录的本地副本 → Claude Code 本地插件加载／本地 Marketplace；npm 依赖通过 Nexus npm Registry；必要的原生二进制通过批准的 Nexus 制品路径分发。把插件获取问题和 SQLite 原生编译问题分开排查。
+
+注意：Nexus Raw Proxy、Nexus npm Registry、公司 HTTP_PROXY 不是同一能力。`npm config registry` 不会自动重写 Claude Code 对 GitHub 或 GitHub Releases 的访问。
+
+## 3. 阶段一：先测试本地插件加载
+
+先在已批准、无敏感数据的测试环境检查项目中的插件入口和 Hooks。以下路径是示例，请替换为真实的 GitLab 工作副本路径：
+
+```powershell
+Set-Location "$HOME\dev\pro-workflow"
+git status
+git rev-parse HEAD
+Get-ChildItem -Force .claude-plugin
+```
+
+检查是否存在 `.claude-plugin/plugin.json`；`marketplace.json` 可能不存在，不能因为缺少它就判定插件不完整。审查插件 Hooks 在启动时会执行什么命令，避免在未知脚本上直接运行。
+
+在仓库根目录尝试：
+
+```powershell
+claude --plugin-dir .
+```
+
+此方法旨在先测试 Claude Code 是否识别本地插件，不要求它直接获取 GitHub 仓库。但不能据此保证它不会触发插件 Hooks、依赖或其他网络请求，也不能据此认定 SQLite 已可用。检查 Commands、Skills、Hooks、Memory/Knowledge Base 等实际功能与错误日志。
+
+## 4. 阶段二：确需持久化时再配置本地 Marketplace
+
+若仓库包含有效的 `.claude-plugin/marketplace.json`，可根据当前 Claude Code 版本支持的本地目录方式注册：
+
+```
+/plugin marketplace add C:/Users/你的用户名/dev/pro-workflow
+```
+
+随后根据 marketplace.json 中实际插件名与 Marketplace 名安装。示例：
+
+```
+/plugin install pro-workflow@pro-workflow
+```
+
+注意：以上安装标识只是示例，不要在未核实 manifest 名称前照抄。若无 Marketplace 定义，继续使用 `--plugin-dir` 测试，或在获批后建立内部 Marketplace。插件注册成功不等于运行时模块构建成功。优先保存批准的版本号与 git commit，避免与 GitLab 副本版本不一致。
+
+## 5. 阶段三：诊断 better-sqlite3
+
+先检查实际运行环境与依赖版本：
+
+```powershell
+node -v
+node -p "process.versions.modules"
+node -p "process.platform"
+node -p "process.arch"
+pnpm why better-sqlite3
+```
+
+若已有 node_modules，在项目目录运行：
+
+```powershell
+node -e "require('better-sqlite3'); console.log('OK')"
+```
+
+`OK` 仅表明该 Node 进程能够加载模块，不等于插件所有 SQLite 功能均已验证。`Cannot find module`、`Could not locate the bindings file`、DLL 错误等应分别排查。
+
+在允许重试的测试目录收集完整安装日志：
+
+```powershell
+pnpm install --reporter append-only
+```
+
+关注 `prebuild-install`、HTTP/TLS 错误、`No prebuilt binaries found`、`node-gyp rebuild`、`find VS` 等出现顺序。重装可能修改 node_modules，避免直接在重要工作副本反复运行。
+
+### 情况 A：有兼容的预编译文件，但下载受阻
+
+记录安装脚本实际请求的 URL、`better-sqlite3` 精确版本、Node 运行时兼容机制／ABI、Windows 平台、CPU 架构。由管理员通过批准流程获取、校验并把二进制放入 Nexus Raw 或合适的内部制品仓库。检查安装脚本是否支持改下载地址；不支持时考虑经验证的内部打包与离线分发，不能直接认为设置 npm Registry 即可解决。
+
+### 情况 B：没有兼容的预编译文件
+
+在公司批准的 Windows 构建机器上使用所需 Visual Studio C++ Build Tools 构建，与 Thin Client 的 Node 版本／ABI、平台、架构及模块版本匹配后，测试并发布完整运行时制品。Thin Client 只获取并使用经批准制品，避免本机安装庞大编译工具链。
+
+### 情况 C：插件本身可部分运行，但 SQLite 不可用
+
+可以先独立验证 Skills、Commands、Hooks 中不依赖 SQLite 的部分；不要声称 Memory/KB 完整可用。若必须实现完整功能，再解决原生模块，不建议仅为了绕过构建而盲目用 sql.js 替换 better-sqlite3，因为涉及源码修改与兼容性验证。
+
+## 6. 存储与长期使用
+
+用户希望整个个人开发环境尽可能控制在 100 MB 左右，但 Node、Claude Code、依赖、插件缓存等是否能满足需先实测，不是已证明的可行指标。应区分完整开发环境、插件运行时目录、可删除缓存与日志；不要删掉 node_modules 后假设插件能运行。将批准的构建制品与必要持久状态保存到允许的持久目录／公司存储，并验证 Thin Client 重启后加载路径和 SQLite 数据位置。
+
+## 7. 实际执行清单（待完成）
+
+- [ ]  确认 GitLab 源码版本与插件元数据，并审查 Hooks。
+- [ ]  在测试目录执行 `claude --plugin-dir .`，记录是否识别及功能结果。
+- [ ]  若需要，核实 Marketplace manifest 后配置持久化安装。
+- [ ]  记录 `better-sqlite3` 精确版本、Node ABI、平台和架构。
+- [ ]  收集预编译二进制获取／node-gyp 回退的完整安装日志。
+- [ ]  核实 Nexus Raw Proxy 能否提供所需制品及安装脚本能否使用内部下载路径。
+- [ ]  无预编译制品时，评估批准的内部 Windows 构建环境。
+- [ ]  验证 SQLite、插件功能、重启后的持久性，并测量真实磁盘占用。
+
+## 8. 当前结论
+
+先尝试在安全测试环境用 `claude --plugin-dir .` 验证本地插件加载；再独立查明 better-sqlite3 预编译文件是否存在及为何下载失败。暂不把安装 Visual Studio Build Tools 作为第一步。所有命令需以实际仓库 manifest、公司审批与当前 Claude Code 版本为准。
