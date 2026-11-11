@@ -1,0 +1,52 @@
+下面把我们之前讨论过的 17 个开发、测试、运维及监控工具统一整理。
+
+我会把三种情况分开：官方提供 Skills、只有官方 MCP/CLI、暂未找到官方 AI 集成。Skills URL 优先给官方仓库或直接指向 SKILL.md，避免把第三方项目误当成官方支持。
+
+官方 Skills 汇总
+
+工具	官方 Skills	Skills URL	推荐优先级
+Grafana	✅ 有	grafana/skills	P0
+Playwright	✅ 有	playwright-cli	P0
+SonarQube	✅ 有	SonarQube Claude Code Plugin	P0
+Microcks	✅ 有	microcks-agent-skills	P0
+Apicurio Registry	✅ 有（仓库内部）	.claude/skills	P1
+Metabase	✅ 有	metabase/agent-skills	P1
+Matomo	✅ 有	matomo-agent-skills	P1
+draw.io	✅ 有	drawio/SKILL.md	P0
+Prometheus	✅ Grafana 官方提供相关 Skills	grafana/skills	P0
+
+这里有两个重要区别：Apicurio 的 Skills 是项目仓库内部开发用途，不一定是可以直接安装的独立插件；Prometheus 的相关 Skills 来自 Grafana Labs，不能直接称为 Prometheus 项目官方发布的 Skills。
+
+只有 MCP、CLI 或 API 的工具
+
+以下工具目前没有确认到由产品官方发布的独立 Claude Code Skills。
+
+工具	官方 Skills	官方 MCP / CLI / API URL	推荐优先级
+Jenkins	未找到	MCP Server	P0
+ReportPortal	未找到	reportportal-mcp-server	P0
+Keycloak	未找到核心项目官方版	Admin CLI 文档	P1
+Nexus Repository	未找到	REST API	P1
+HedgeDoc	未找到	hedgedoc/cli	P2
+Open VSX	未找到	ovsx CLI	P2
+Swagger Editor	未找到	swagger-editor	P2
+HashiCorp Vault	未找到 Vault 专用版	vault-mcp-server	P2
+Evolveum midPoint	未找到	midPoint 官方仓库	P2
+
+补充：HashiCorp 确实有 官方 Agent Skills 仓库⁠￼，但目前列出的产品插件是 Terraform 和 Packer，并非 Vault。GitHub
+
+建议优先安装的 5 个
+
+按你目前的 Claude Code + GitLab CI/CD + ROSA/OpenShift + 企业内网环境排序：
+
+顺序	官方 Skills	核心用途
+1	Grafana Skills	Prometheus、PromQL、告警与监控分析
+2	Playwright Skills	自动编写和执行 E2E 测试
+3	SonarQube Plugin	代码质量、问题修复、测试覆盖率
+4	Microcks Skills	API Mock、Contract Test
+5	draw.io Skill	自动生成可编辑的系统架构图
+
+其中 Grafana、draw.io 和 Metabase 的官方仓库及安装说明已经再次核对。grafana/skills · GitHub +2
+
+说明： 上表汇总的是此前讨论的项目及其官方入口，并非逐一重新审计了每个仓库中的 SKILL.md。对于 SonarQube、Microcks 等，链接指向官方插件介绍或仓库，不能等同于已逐个验证所有 Skill 文件。
+
+对企业内网来说，建议把这些仓库导入内部 GitLab 后再安装，并检查 Skill 引用的脚本、npm 包和外部 URL。这样更容易通过 Nexus 代理控制依赖，也便于版本锁定和安全审查。
