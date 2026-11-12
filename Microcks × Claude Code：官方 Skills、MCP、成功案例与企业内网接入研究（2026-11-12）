@@ -1,0 +1,148 @@
+> 整理日期：2026-11-12。本文汇总当前对话的发现、操作示例及待验证事项。**公开仓库的具体文件状态、成功案例与版本要求来自此前讨论，未在本次保存操作中重新实测；不得把“未发现”理解为“官方不存在”。**
+> 
+
+## 1. 核心结论
+
+- **Microcks Agent Skills**、**独立 Microcks MCP Server**、**Microcks 自带 MCP Endpoint** 是不同的技术路线。
+- 之前未找到可以独立核实的、完整展示 Microcks 官方 Agent Skills 在 Claude Code 中安装并运行成功的公开案例。
+- 之前检查 `microcks-agent-skills` 的 main 分支时，未看到 `SKILL.md`、`skills/`、`.claude/skills/`、`.claude-plugin/` 等可直接安装入口。该结论受分支和检查时间限制，应重新核对。
+- Microcks 自带 MCP Endpoint 的主要用途是把**已有 Mock API** 作为 MCP Tools 提供给 AI Agent；**不是**现成的平台管理、Contract Test 执行或历史测试结果查询工具。
+- 在公司 ROSA 上的 Microcks 1.14 环境，建议先验证内置 MCP 的 Mock API 调用，再为管理/测试能力评估 REST API 或 CLI，最后封装内部 Claude Code Skill。
+
+## 2. 相关官方项目与链接
+
+| 项目 | 地址 | 角色与边界 |
+| --- | --- | --- |
+| Microcks Agent Skills | microcks/microcks-agent-skills | 专用 Agent Skills 项目；安装可用性待复核 |
+| Microcks MCP Server | microcks/microcks-mcp-server | 独立运行的 MCP Server；工具覆盖、稳定性待验证 |
+| Microcks 内置 MCP Endpoint | 官方说明 | 将已有 API Mock 暴露为 MCP Tools |
+| Microcks Aspire | microcks/microcks-aspire | 讨论中过的 Skill Creator 相关项目；不是现成的 Microcks 平台管理 Skill |
+| Agent Skills Issues | Issues | 用于追踪仓库成熟度与安装问题 |
+| 初始化 Issue | Issue #1 | 此前讨论涉及的项目初始化线索 |
+
+### 三者的架构差别
+
+1. **Agent Skill**：给 Claude Code 的工作流说明、参考文件与脚本，不会因为有 `SKILL.md` 就自动获得 Microcks 权限或连接能力。
+2. **独立 MCP Server**：Claude Code → 独立服务 → Microcks API。需要额外部署、连接配置与鉴权。
+3. **内置 MCP**：Claude Code → Microcks 的 Mock MCP Endpoint → 已导入的 Mock API。无需为该 Mock 再部署一个独立 MCP Server，但网络与权限仍需满足要求。
+
+## 3. Agent Skills：公开案例与安装问题
+
+此前讨论结论：**尚未找到 Microcks 官方 Agent Skills 在 Claude Code 上从安装到实际使用的完整、可独立验证成功案例**。这不等于没有任何人成功运行。
+
+曾参考的对照资料：
+
+- Anthropic 官方 Skills 安装实测（第三方）
+- Claude Code Issue #68664：插件/Skill 加载问题案例
+- Claude Code Issue #25834：子代理中插件 Skills 加载问题案例
+
+这些仅是 Claude Code **通用机制**的对照案例，**不是 Microcks 官方 Skill 成功运行的证据**。
+
+### 安装与发现检查
+
+此前讨论中的 Marketplace 命令是**待验证尝试**，不能当作已获官方确认的安装方式：
+
+```
+/plugin marketplace add microcks/microcks-agent-skills
+```
+
+Claude Code 内可用 `/plugin` 检查插件，`/mcp` 检查 MCP 连接。终端侧可以检查本地已安装的 Skill 文件：
+
+```bash
+find ~/.claude/skills ~/.claude/plugins -iname 'SKILL.md' 2>/dev/null | grep -i microcks
+```
+
+检查仓库当前检出的版本：
+
+```bash
+git clone https://github.com/microcks/microcks-agent-skills.git
+cd microcks-agent-skills
+find . \( -name SKILL.md -o -name plugin.json \) -print
+```
+
+输出为空只能证明**当前本地检出的版本**没发现这两种文件，不能证明历史分支、发布附件或别的安装入口不存在。
+
+排障按四类划分：(1) 安装失败；(2) 安装成功但列表不可见；(3) 可见但调用失败；(4) 可运行但无法访问公司 Microcks。分别检查插件清单/目录、Skill 元数据与触发条件、脚本依赖、代理/Route/OIDC/Keycloak 与网络可达性。
+
+## 4. 独立 microcks-mcp-server
+
+此前查看的项目描述：Java 25 + Quarkus，开发版本 `0.0.1-SNAPSHOT`，README 给出的开发启动示例：
+
+```bash
+git clone https://github.com/microcks/microcks-mcp-server.git
+cd microcks-mcp-server
+./mvnw clean quarkus:dev
+```
+
+此前讨论中 README 的本地 MCP 地址示例：
+
+```
+http://localhost:8080/mcp
+```
+
+曾提及 SSE `/mcp/sse`；是否在当前版本启用、有哪些真实 tools、能否查询服务/启动 Contract Test/读历史结果，以及 Java 25 要求是否仍适用，均应以当前 README、代码和实际 tools/list 为准。开发服务启动成功不等于业务功能完整或可用于生产。
+
+## 5. Microcks 内置 MCP Endpoint
+
+### 用途
+
+Microcks 把已存在的 Mock API 映射成 MCP Tools。例如原有订单 API `GET /orders/{id}`，Agent 可以发现相应工具并拿到 Mock 响应，而不访问真实订单后端。
+
+此前对话根据官方说明提及：OpenAPI、GraphQL Query/Mutation、gRPC Unary RPC 以及 SSE / Streamable HTTP 传输相关能力。具体支持范围、版本与传输能力以部署版本的官方文档和真实 Endpoint 为准。
+
+| 需求 | 内置 MCP 的定位 |
+| --- | --- |
+| 调用已有 OpenAPI Mock | 主要用途 |
+| 调用已暴露的 GraphQL/gRPC Mock | 视相应功能及配置而定 |
+| 自动创建或导入 Mock | 非其主要用途；需管理 API/其他工具 |
+| 启动 Contract Test | 不应假定内置 MCP 已提供 |
+| 查询测试执行历史与失败原因 | 不应假定内置 MCP 已提供 |
+
+### 在 ROSA + Microcks 1.14 环境的验证
+
+1. 在 Microcks Web UI 选择一个已导入的 Mock。
+2. 找到该 Mock 的 MCP Server 区域；复制页面实际显示的 **HTTP Streamable Endpoint**（不同版本/配置可能不同）。
+3. 在 Claude Code 添加，命令模板如下（占位 URL 非真实 Endpoint）：
+
+```bash
+claude mcp add --transport http microcks-orders "https://<microcks-host>/<actual-mcp-path>"
+```
+
+1. 在 Claude Code 执行 `/mcp` 检查连接，再请求列出工具并调用一个无副作用的 Mock。
+2. 记录工具发现、HTTP 状态码、认证方式、代理与网络结果。
+
+**不能随意把内置 MCP 地址写成 `/mcp`**；此前独立 MCP Server 的示例地址与内置 Mock Endpoint 路径不可混用。
+
+## 6. 企业内网落地建议与分阶段验证
+
+环境背景：Claude Code、公司代理、Nexus GitHub Raw Proxy、GitLab、ROSA Microcks 1.14 与 Keycloak/OIDC。
+
+| 阶段 | 目的 | 通过标准 |
+| --- | --- | --- |
+| P0 版本/源码核验 | 验证官方 Skills 仓库/安装结构、README、Issue、Release | 找到可复现安装入口或确认当前检出版本不可直接安装 |
+| P1 内置 MCP 连通 | 最小 Mock 调用 | Claude Code `/mcp` 正常、tools/list 可见、返回预期 Mock |
+| P2 安全检查 | 公司 Proxy、ROSA Route、TLS、Keycloak/OIDC、访问权限 | 不泄露 token、最小权限、访问审计可追溯 |
+| P3 测试集成 | 以 Microcks REST API / 可用 CLI 运行和读取 Contract Tests | 能启动测试、轮询状态、读失败明细并关联 GitLab CI |
+| P4 内部 Skill 封装 | 将验证过的 CLI/API 操作编写为内部 `SKILL.md` | 指令可重复、权限清晰、异常可恢复 |
+
+建议 Skill 只负责**任务指导和封装**，真实动作由 Microcks 官方 API、受控 CLI 或经过审核的 MCP Tools 执行。对于生产权限，建议先只读查询测试记录；创建/修改 Mock 与启动测试使用独立、最小化权限身份。
+
+## 7. 目前未确认的问题
+
+- [ ]  `microcks-agent-skills` 最新 main、tag 和其他分支是否已有 `SKILL.md`、插件清单或发布产物
+- [ ]  是否有 Microcks 维护者或社区提供的端到端 Claude Code Skills 成功实录
+- [ ]  独立 `microcks-mcp-server` 当前实际 MCP Tools 与认证机制
+- [ ]  目标 Microcks 1.14 界面是否展示 MCP Endpoint，支持的认证及传输方式
+- [ ]  公司的 ROSA Route、Proxy、Keycloak/OIDC 对 MCP Client 的具体影响
+- [ ]  Microcks REST API 如何最可靠地执行 Contract Test、读取失败明细并与 GitLab CI/ReportPortal 关联
+- [ ]  Aspire Skill Creator 的实际输入、输出、安装方式与可复现样例
+
+## 8. 参考链接
+
+- Microcks MCP 官方文档
+- Microcks Agent Skills
+- Microcks MCP Server
+- Microcks Aspire
+- Claude Code MCP 文档
+
+**文档性质：对话研究纪要与实施建议，不代表已完成公司内网实测或官方生产支持认证。**
