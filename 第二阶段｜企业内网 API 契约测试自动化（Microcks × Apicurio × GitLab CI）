@@ -1,0 +1,276 @@
+关联资料：Claude Code 官方 Skills、MCP 与 CLI 工具清单（开发·测试·运维）；第一阶段｜企业内网 CI 测试分析实施方案（glab × Playwright × ReportPortal）。
+
+> 状态：技术实施方案草案（2026-11-13）。本页整理自对话，尚未经过公司部署环境的实测；URL、示例域名、参数与工具版本在使用前需逐项验证，特别是 Microcks Skills、Apicurio MCP 与 Microcks 测试 API 的版本适配。
+> 
+
+## 一、目标和架构
+
+**目标**：在 API 变更合并前，自动识别 OpenAPI 规范错误、向后兼容性问题和实现不符合契约的问题。Claude Code 负责任务编排、变更解释和 RCA；确定性验证由 CLI 和 CI 完成。
+
+**执行流程**：
+
+1. GitLab MR 修改 `contracts/` 中的 OpenAPI。
+2. Swagger Editor 供人工编辑审查；Spectral 负责 Lint。
+3. OpenAPI Diff 工具对比基线与候选契约；Breaking Change 形成质量门禁。
+4. Apicurio Registry 保存正式受治理版本；候选契约使用隔离空间。
+5. Microcks 根据候选契约提供 Mock 并针对测试环境执行 Contract Test。
+6. GitLab CI 留存测试结果和证据；Claude Code 读取 MR/CI/Microcks 结果，输出审查报告。
+7. 不从 MR Pipeline 直接覆盖生产 Registry，也不对生产 API 执行测试。
+
+**职责区分**：
+
+- GitLab：契约源码、MR 与审批的来源。
+- Apicurio：Schema 和 API Artifact 的版本治理。
+- Microcks：Mock、Contract Test。
+- Spectral：OpenAPI 静态 Lint，不等于兼容性验证。
+- OpenAPI Diff：旧版与新版契约的兼容性检查。
+- Claude Code：利用 Skills/MCP/API 协调任务和进行证据分析。
+
+## 二、官方入口与选型
+
+| 工具 | 来源 | 首期作用 | 优先级 |
+| --- | --- | --- | --- |
+| Microcks | 官方 Agent Skills | Mock / Contract Test 辅助 | P0 |
+| Apicurio Registry | 仓库内 Skills；MCP 模块 | 契约检索、版本管理 | P1 |
+| Swagger Editor | 官方仓库 | OpenAPI 编辑 UI | P1 |
+| glab | GitLab CLI | MR 与 Pipeline 操作 | P0 |
+| Spectral | 官方仓库 | 静态规范检查 | P0 |
+| oasdiff 等 | 需内部审查和固定版本 | Breaking Change 检测 | P0 |
+
+注意：Apicurio 仓库内 Skills 可能面向该项目开发者，不意味着它们都适用于部署后的 Registry 操作。Swagger Editor 也不必强行安装 Skills。上述来源状态应按具体 commit 审核，不能仅凭仓库存在就默认脚本可执行或兼容环境。
+
+## 三、建议 GitLab 项目结构
+
+```
+api-contract-platform/
+├── CLAUDE.md
+├── .claude/
+│   └── skills/
+│       └── api-contract-review/
+│           └── SKILL.md
+├── contracts/
+│   └── payment-api/
+│       └── openapi.yaml
+├── examples/
+│   └── payment-api/
+│       └── success.json
+├── policies/
+│   └── spectral.yaml
+├── scripts/
+│   ├── validate-contract.sh
+│   ├── publish-registry.sh
+│   ├── check-breaking-changes.sh
+│   └── run-microcks-test.sh
+├── reports/
+└── .gitlab-ci.yml
+```
+
+## 四、企业内网安装与部署
+
+### Microcks Skills
+
+1. 将官方仓库固定版本/commit 并导入公司 GitLab。
+2. 审阅每个 `SKILL.md`、附带脚本、外部下载、网络调用和写操作权限。
+3. 仅把通过审查的 Skill 安装到 `.claude/skills/`。
+4. 不允许 Claude Code 自行在生产 Microcks 创建、删除或修改资源。
+
+```bash
+git clone https://gitlab.example.internal/platform/microcks-agent-skills.git
+```
+
+### Apicurio MCP
+
+建议部署于 ROSA 内部，由企业认证/代理保护；Registry REST API 最初仅开放 Artifact、版本、元信息只读查询。实际运行方式和 MCP 工具以锁定版本的 README 复核。
+
+```
+Claude Code
+  -> 受控 MCP 连接
+  -> Apicurio MCP Server
+  -> Apicurio Registry API
+```
+
+### Nexus npm Group / Spectral
+
+```bash
+npm config set registry https://nexus.example.internal/repository/npm-group/
+npm install --save-dev @stoplight/spectral-cli@<approved-version>
+npx spectral lint contracts/payment-api/openapi.yaml
+```
+
+`<approved-version>` 是占位符。严格锁定批准版本，构建镜像从内部仓库获取依赖。Swagger Editor 如需自建 UI，也应由批准的内部镜像发布。
+
+## 五、OpenAPI 示例：支付接口
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Payment API
+  version: 1.0.0
+paths:
+  /payments/{id}:
+    get:
+      operationId: getPayment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [PENDING, COMPLETED]
+```
+
+如果将响应属性 `status` 改为 `paymentStatus`，可能导致旧客户端失效。Spectral Lint 通过不能证明兼容；应由 OpenAPI Diff 比对旧版和候选版，并按公司政策阻止或人工批准 Breaking Change。Microcks 再验证真实测试环境实现的响应是否符合候选契约。Mock 返回正常不等于真实服务实现合规。
+
+## 六、CI/CD 模板
+
+以下是流程编排模板；内部镜像、`npm ci --offline` 缓存以及两个脚本必须先实际准备。
+
+```yaml
+stages:
+  - validate
+  - compatibility
+  - contract-test
+
+openapi-lint:
+  stage: validate
+  image: registry.internal/ci/node-api-tools:approved
+  script:
+    - npm ci --offline
+    - npx spectral lint contracts/payment-api/openapi.yaml
+
+openapi-breaking:
+  stage: compatibility
+  image: registry.internal/ci/api-diff-tools:approved
+  script:
+    - ./scripts/check-breaking-changes.sh
+  artifacts:
+    when: always
+    paths:
+      - reports/openapi-diff/
+
+microcks-contract-test:
+  stage: contract-test
+  image: registry.internal/ci/api-test-tools:approved
+  script:
+    - ./scripts/run-microcks-test.sh
+  artifacts:
+    when: always
+    paths:
+      - reports/microcks/
+```
+
+| 脚本 | 输入 | 产物 | 失败条件 |
+| --- | --- | --- | --- |
+| validate-contract.sh | OpenAPI YAML | Lint 结果 | 规范错误 |
+| check-breaking-changes.sh | 基线与候选契约 | Diff JSON/MD | 不允许的兼容性破坏 |
+| publish-registry.sh | 已批准契约 | Artifact ID/Version | 发布失败 |
+| run-microcks-test.sh | 契约、测试 URL | 测试 ID、结果 | 契约测试失败 |
+
+**发布机制**：MR 仅做检查与隔离测试，正式 Registry 发布交给合并后的受保护流水线/人工审批流程。
+
+## 七、Microcks 契约测试执行流程
+
+1. 使用独立 CI 账号取得受限令牌。
+2. 将候选 OpenAPI 和必要示例导入隔离的 Microcks 测试空间。
+3. 指定测试目标、Runner 和执行参数。
+4. 使用当前部署版本支持的 Microcks API 启动 Contract Test，记录 Test ID。
+5. 轮询测试结束，设置超时和失败重试界限。
+6. 取得结果，转换为标准 JSON/JUnit；归档到 GitLab。
+7. 清理临时对象，保留测试结果和可追溯链接。
+
+示例目标：`https://payment-api.test.internal`。必须确认测试 Runner 的 DNS、网络、CA、mTLS、OIDC 权限；仅终端可访问不代表 Microcks Runner 可访问。API 路径不可在未核对版本时硬编码。
+
+## 八、内部 Skill：api-contract-review
+
+文件：`.claude/skills/api-contract-review/SKILL.md`（自建编排，不属于官方）。
+
+```markdown
+---
+name: api-contract-review
+description: Review OpenAPI changes and analyze compatibility and Microcks contract test results.
+---
+
+# API Contract Review
+
+## Inputs
+- GitLab project and merge request
+- Changed OpenAPI files
+- Baseline contract version
+- Optional Microcks test execution ID
+
+## Workflow
+1. Read changed OpenAPI contracts.
+2. Identify changed paths, operations and schemas.
+3. Run approved OpenAPI lint tools.
+4. Compare baseline and candidate contracts.
+5. Summarize breaking and non-breaking changes.
+6. Retrieve Microcks contract test evidence.
+7. Correlate CI failures with changed API elements.
+8. Generate an evidence-based review report.
+
+## Rules
+- Never modify production Registry artifacts.
+- Never test production endpoints.
+- Never infer compatibility from lint success alone.
+- Do not treat mocked responses as proof of actual service conformance.
+- Separate confirmed failures and hypothesized risks.
+- Do not automatically publish or approve contracts.
+
+## Output
+- Changed API summary
+- Breaking change findings
+- Contract test results
+- Evidence and links
+- Risk assessment
+- Suggested remediation
+```
+
+可给 Claude Code 的自然语言任务：
+
+> 分析当前 GitLab Merge Request 的 OpenAPI 变更。与目标分支的契约版本比较，执行已批准的静态检查与 Breaking Change 检查，读取相关 Microcks 测试结果。区分规范错误、向后不兼容、实现不符合契约，生成带证据链接的 Markdown 报告。不要修改正式 Registry，也不要对生产环境测试。
+> 
+
+## 九、权限与风险
+
+| 系统 | 建议最小权限 | 强制约束 |
+| --- | --- | --- |
+| Claude Code | 只读 MR、运行审查脚本 | 禁止自动合并和发布 |
+| glab / GitLab | 读取仓库、MR、Pipeline | 受保护分支不可写 |
+| Apicurio MCP | 只读查询 Artifact 和 Version | 禁止覆盖或删除 |
+| Microcks | CI 测试账号可导入与执行 | 仅隔离空间/测试环境 |
+| GitLab Runner | 专用 Runner 和受限网络 | 禁止特权容器和公网直连 |
+| Nexus | 批准版本的 npm 与镜像代理 | 审核安装脚本与依赖 |
+
+**安全原则**：提示词不是权限边界。令牌隔离、MCP 工具白名单、网络策略、审计日志是技术边界。OpenAPI 示例应使用脱敏数据，不得嵌入真实客户信息或生产认证信息。
+
+## 十、验收清单
+
+- [ ]  已审核并固定 Microcks Skills 版本，Claude Code 可识别。
+- [ ]  Apicurio MCP / Registry 只读查询可用且写入受限制。
+- [ ]  Spectral 可发现故意制造的结构错误。
+- [ ]  Diff 工具能发现删除字段、移除响应、增加必填请求参数等 Breaking Change。
+- [ ]  Microcks 能对测试环境执行契约测试并返回 Test ID。
+- [ ]  GitLab CI 保存测试结果、Evidence、CI 与测试记录关联 ID。
+- [ ]  Claude Code 能依据证据生成 API 变更分析报告。
+- [ ]  MR 流程无法直接覆盖正式 Registry 版本。
+
+## 十一、交付顺序
+
+- **A：规范质量门禁**：Spectral + OpenAPI Diff + GitLab CI；最小依赖，先做到确定性的 Blocking Gate。
+- **B：Microcks 契约测试**：导入隔离契约，调用 Test Runner，存储测试结果。
+- **C：Claude Code 智能分析**：Microcks Skills、Apicurio MCP、第一阶段 glab 证据链联合生成 MR Review。
+
+**待确认**：Microcks 版本、Apicurio Registry 版本、Registry 是否已部署 ROSA、GitLab Runner 类型、Nexus/npm 代理、Microcks Runner 网络权限和企业认证方式。
