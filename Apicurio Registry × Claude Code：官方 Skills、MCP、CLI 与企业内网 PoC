@@ -1,0 +1,119 @@
+> 整理日期：2026-11-13。根据本次对话中 Apicurio Registry 与 Claude Code 集成讨论整理。**注意：下列仓库目录、Skill 名称及 MCP 参数来自此前调查摘要，本文未再次逐文件验证；PoC 前须核对对应版本的官方源码与文档。**
+> 
+
+## 1. 总结
+
+- Apicurio Registry 是 API 契约和 Schema 管理组件；Microcks 负责 Mock、契约测试。Claude Code 可通过 Skills、MCP、CLI 或 REST API 辅助开发。
+- Apicurio 官方代码仓库此前观察到 `.claude/skills/`、`mcp/`、`cli/`、`CLAUDE.md` 等线索。
+- **官方项目开发 Skills 不等同于“管理运行中的 Registry 实例”的 Skills。** 面向企业内网 Registry 查询和修改，优先验证官方 MCP Server。
+- 官方 MCP README 曾列出 Groups、Artifacts、Versions 与 Configuration Properties 等操作；生产能力应以实际工具清单、鉴权和部署版本为准。
+
+## 2. 官方项目与入口
+
+| 对象 | 官方地址 | 用途 |
+| --- | --- | --- |
+| Registry 源码 | Apicurio/apicurio-registry | 主项目 |
+| 官方 Skills 目录 | .claude/skills | 面向源码项目开发的 Claude Code Skills |
+| Claude 开发指引 | CLAUDE.md | Skill 使用/开发约定 |
+| MCP Server | mcp/ | 通过 MCP 操作 Registry |
+| CLI | cli/ | 命令行入口 |
+| OpenAPI 描述 | openapi.json | REST API 契约参考 |
+| AI-native CLI 提案 | Issue #7882 | `acr ai` / `acr ai skill` / `acr ai mcp` 的提案；不要视为已正式发布 |
+
+## 3. 官方 Skills 具体线索
+
+| Skill 名 | 用途 | 证据等级 |
+| --- | --- | --- |
+| `apicurio-test-quality` | 项目测试代码质量评估；此前讨论提到检查 P1–P30 测试失败模式、涉及测试路径时要求执行、低于 7.0 的阻断阈值 | 此前调查称在官方 `CLAUDE.md` 中明确引用；需核实当前实际文件和规则 |
+| `storage-variant-guide` | 维护不同存储实现的行为一致性 | 在第三方目录被标为 Apicurio 发布；尚未逐文件对照官方仓库 |
+
+**使用边界**：两个 Skill 线索均主要用于 Apicurio 自身的代码开发维护；不能推定可以用来执行线上 Registry 的 Artifact 管理、发布或测试查询。
+
+### 全量发现命令
+
+```bash
+git clone --depth 1 https://github.com/Apicurio/apicurio-registry.git
+cd apicurio-registry
+find .claude/skills -name SKILL.md -print
+for file in .claude/skills/*/SKILL.md; do
+  echo "===== $file ====="
+  sed -n '1,35p' "$file"
+done
+```
+
+该命令用于核实当前检出的官方仓库是否确有这些 Skill，不能替代实际在 Claude Code 中安装与调用的成功验证。
+
+## 4. 官方 MCP Server 的定位
+
+此前讨论中，官方 MCP README 涉及：
+
+- Artifact Types 列表查询
+- Groups 的创建、读取、搜索与更新
+- Artifacts 的创建、读取、搜索与更新
+- Versions 的创建、读取、搜索与更新
+- Configuration Properties 的查询、列表及部分更新
+- 查询 Registry 版本、搜索 Artifact、比较版本等自然语言工作流示例
+
+这些代表**文档中描述的能力**，并非已在公司网络或指定版本完成实测。是否有删除类工具、工具命名、权限控制及 API 覆盖范围，应通过 MCP `tools/list` 和版本说明核实。
+
+## 5. Claude Code 接入示例（待验证模板）
+
+此前对话讨论过以下 Docker stdio 启动方式：
+
+```bash
+claude mcp add apicurio \
+  -- docker run -i --rm \
+  -e REGISTRY_URL=http://registry.internal:8080 \
+  quay.io/apicurio/apicurio-registry-mcp-server:latest-snapshot
+```
+
+**重要限制**：
+
+- `registry.internal` 为占位地址。
+- `latest-snapshot` 为开发镜像，不能直接认定适合生产。
+- 镜像名称、`REGISTRY_URL` 参数及其他认证配置，需要和当前官方 README 核对后再执行。
+- 初期采用只读或安全模式；此前提及 `apicurio.mcp.safe-mode=true`，具体参数形式须核对。
+- 公司内网需经内部 Registry/Nexus 处理镜像和依赖；确保容器到 Registry 的网络、DNS、TLS 证书及认证可用。
+- 若 Registry 启用了 Keycloak/OIDC，需要明确 token 获取、更新及用户权限传递；此前讨论提到 HTTP MCP 方式和调用者 token 转发，应以官方安全章节确认。
+
+## 6. 与 Microcks、GitLab CI 的组合
+
+```
+Claude Code
+   ├── Apicurio MCP / REST API
+   │      └── 查询、比较、发布 API 契约和 Schema
+   ├── Microcks 内置 MCP / REST API
+   │      └── 读取 Mock 结果、运行契约测试（按接口能力拆分）
+   └── GitLab CI
+          └── 触发自动化、归档日志与测试结果
+```
+
+建议流程：Apicurio 存储契约 → Claude Code 检查版本差异及破坏性修改 → 通过受控 CI 向 Microcks 导入/更新 Mock → 执行 Contract Test → 在 GitLab CI 输出结果，必要时关联 ReportPortal。该流程是**方案建议，不是已验证的官方一键集成**。
+
+## 7. 企业内网推荐 PoC 顺序
+
+| 优先级 | 验证事项 | 成功标准 |
+| --- | --- | --- |
+| P0 | 确认官方 Skills 文件、MCP 版本与 README | 明确官方实际提供哪些文件及工具 |
+| P1 | Claude Code 连接 Registry MCP | MCP 正常连接，能列出工具 |
+| P1 | 只读查询 Artifact、Groups 和版本 | 返回可核对的契约、版本元数据 |
+| P2 | 比较版本并识别潜在破坏性变更 | 可复核的差异结论；必要时结合专用 lint/check |
+| P2 | Keycloak/OIDC、最小权限和审计 | 非管理员可用、写操作受限 |
+| P3 | GitLab CI + Microcks 联动 | 测试结果在 CI 内可追踪、失败原因可复现 |
+| P3 | 封装公司内部 Claude Code Skill | 固化允许的 MCP/API 操作与检查步骤 |
+
+## 8. 待确认事项
+
+- [ ]  官方 `.claude/skills/` 当前全部 Skill 名称、说明与所需依赖
+- [ ]  `apicurio-test-quality` 的真实评分规则与触发机制
+- [ ]  `storage-variant-guide` 是否能在官方当前分支找到原始 `SKILL.md`
+- [ ]  MCP 正式版/开发版状态、镜像标签及现有工具清单
+- [ ]  安全模式参数、HTTP MCP 与 OIDC token 转发的具体部署方案
+- [ ]  `acr ai skill` 是否从 Issue #7882 提案转入实际发行版本
+- [ ]  OpenAPI/Schema breaking-change 判断应采用哪些官方校验规则
+
+## 9. 相关笔记
+
+- Microcks × Claude Code：官方 Skills、MCP、成功案例与企业内网接入研究（2026-11-12）
+
+**结论：当前企业内网适配优先级为官方 MCP > 已核实的 REST API/CLI > 面向 Apicurio 源码维护的 Skills。**
