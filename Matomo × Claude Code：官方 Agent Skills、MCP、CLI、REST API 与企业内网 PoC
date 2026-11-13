@@ -1,0 +1,148 @@
+> 整理日期：2026-11-13。根据本次对话的 Matomo × Claude Code 调查整理。本文记录官方入口、此前查到的能力、示例配置与公司内网 PoC 建议。**尚未在公司环境实测；Skill 数量、具体名称、插件设置与版本以当前官方 README/源码为准。**
+> 
+
+## 1. 技术定位和结论
+
+Matomo 是开源 Web Analytics 平台，涉及网站访问、来源、事件、目标转化等数据。与 Claude Code 结合有两种不同方向：
+
+- **Matomo Agent Skills**：主要帮助开发、测试、审查 Matomo 本体或插件的源码。
+- **Matomo MCP Server**：面向 AI 客户端查询和解释 Matomo Analytics 数据，也可在受控条件下进行部分管理操作。
+- **Matomo CLI/REST API**：分别适合系统运维和自动化数据查询。
+
+此前调查发现 Matomo 官方组织下有 Agent Skills 和 MCP Server 仓库，比只看到仓库骨架、尚未确认可安装性的 Microcks Agent Skills 更有明确的文档入口。**有官方 README 不等于已经成功安装，也不等于支持目标 Matomo 版本。**
+
+## 2. 官方链接
+
+| 能力 | 官方地址 | 主要用途 |
+| --- | --- | --- |
+| Agent Skills | matomo-org/matomo-agent-skills | Matomo 开发、测试与代码质量 |
+| MCP Server 插件 | matomo-org/plugin-McpServer | 查询统计、交互式分析、可选管理工具 |
+| CLI Console | Matomo Console commands | 运维、归档、后台任务 |
+| Reporting API | 官方 Reporting API | 查询 VisitsSummary 等报告 |
+
+## 3. 官方 Agent Skills
+
+此前官方 README 描述使用标准 `SKILL.md`，并提及 Claude Code / Codex 使用方式与重启后发现 Skills 的说明。此前调查称 README **至少列出 17 个 Skills**；此数量未在本次保存操作中再次逐个复核。
+
+### 具体 Skill 名称与用途（此前调查线索）
+
+| Skill | 用途 | 推荐理由或限制 |
+| --- | --- | --- |
+| `matomo-test-runner` | PHP、UI、Vue/Jest 测试 | 有利于测试流程，需 Matomo 专用环境 |
+| `matomo-code-quality` | PHPStan、PHPCS 静态检查 | 适用于 Matomo PHP 项目 |
+| `matomo-review` | Git Diff / PR 审查 | 应检查 GitLab MR 兼容性 |
+| `matomo-adversarial-review` | 深度质量与安全审查 | 适合变更前风险识别 |
+| `matomo-pr-autofix` | PR CI 失败诊断和修复 | 可能依赖 GitHub Actions、需迁移到 GitLab |
+| `matomo-security-rules` | Matomo 安全规则与 token 处理 | 对插件开发尤其重要 |
+| `matomo-api-development-rules` | API 开发约定 | 项目内部开发规范 |
+| `matomo-vue-development-rules` | Vue 开发约定 | 前端开发 |
+| `matomo-twig-development-rules` | Twig 模板规范 | UI 插件开发 |
+| `matomo-css-development-rules` | CSS / Less 开发约定 | 样式开发 |
+| `matomo-plugin-architecture` | 插件架构与实现 | 插件开发 |
+| `matomo-migrations-workflow` | 数据库迁移 | 升级维护 |
+| `matomo-debt-check` | 技术债检查 | 维护质量 |
+| `matomo-ui-screenshot-audit` | UI 截图审核 | 视觉回归检查 |
+
+此表仅列出此前讨论中提及的名称，**不是已审计的完整 Skills 目录**。部分工具需要 DDEV、PHP 或特定 Matomo 代码结构，不是通用 CI 测试 Skill。
+
+### 核查方式
+
+```bash
+git clone --depth 1 https://github.com/matomo-org/matomo-agent-skills.git
+cd matomo-agent-skills
+find . -name SKILL.md -print
+```
+
+先阅读 README 的具体安装方式及 Skill 元数据，再进行 Claude Code 安装。不要凭仓库名称猜测 `/plugin marketplace add` 必然有效。
+
+## 4. 官方 MCP Server 插件
+
+官方仓库：plugin-McpServer。
+
+此前讨论总结的功能：
+
+| 功能 | 状态和边界 |
+| --- | --- |
+| 网站访问量、流量来源查询 | 官方插件面向的核心场景 |
+| 营销活动与转化分析 | 官方插件示例领域 |
+| 周报/月报辅助生成 | 由查询数据 + Claude Code 总结完成 |
+| Segment 创建/更新 | 可选开启，需鉴权与权限约束 |
+| 原始 Matomo API 发现/执行 | 管理员单独启用，不宜默认开放 |
+| OAuth2 / Bearer Token | 需按当前插件文档、Matomo 部署模式复核 |
+
+此前讨论指出插件默认关闭 MCP，且不默认开放原始 API 执行能力。需在**实际 Matomo 版本和插件 UI** 中核实设置名称、入口和 MCP URL。
+
+### GUI 启用流程（来自此前调查，需版本核查）
+
+1. 安装 `McpServer` 插件。
+2. 在 `Administration → Plugins` 激活。
+3. 在 `Administration → System → General Settings → McpServer` 启用 MCP。
+4. 从 `Administration → Platform → MCP Server` 读取实际连接方式。
+5. 在 Claude Code 配置对应 MCP Endpoint，执行 `/mcp` 检查连接与工具列表，并用只读查询测试。
+
+不要编造固定路径；必须从实际实例/官方配置复制 Endpoint。
+
+## 5. CLI 与 REST API
+
+### CLI（Matomo Console）
+
+```bash
+./console list
+./console help
+./console core:archive
+```
+
+CLI 运行在具有 Matomo 应用环境与相应权限的主机/容器内部，适合归档、维护和命令式运维；不等同于远程分析 API。
+
+### REST Reporting API 示例
+
+```bash
+curl -X POST \
+  "https://matomo.example.com/index.php" \
+  --data-urlencode "module=API" \
+  --data-urlencode "method=VisitsSummary.get" \
+  --data-urlencode "idSite=1" \
+  --data-urlencode "period=day" \
+  --data-urlencode "date=yesterday" \
+  --data-urlencode "format=JSON" \
+  --data-urlencode "token_auth=$MATOMO_TOKEN"
+```
+
+使用 POST 以避免 token 进入 URL 查询字符串。仍需避免在日志、shell history、CI 输出中暴露 token；应使用 secret manager/安全变量并限制权限。上述 URL 是占位符。
+
+## 6. 与 Microcks / Apicurio 的对比
+
+| 产品 | 官方 Agent Skills | 官方 MCP | 最适合的 Claude Code 用途 |
+| --- | --- | --- | --- |
+| Microcks | 此前未确认有可直接安装的完整 Skills | 内置 Mock MCP | 调用已有 Mock API |
+| Apicurio Registry | 有面向源码开发的 Skills 线索 | 独立 MCP | 契约/Schema 的查询和版本操作 |
+| Matomo | 官方仓库和 README 描述多种开发 Skills | 官方 MCP 插件 | Web Analytics 查询与插件开发测试 |
+
+相关 Notion 笔记：
+
+- Microcks × Claude Code：官方 Skills、MCP、成功案例与企业内网接入研究（2026-11-12）
+- Apicurio Registry × Claude Code：官方 Skills、MCP、CLI 与企业内网 PoC
+
+## 7. 企业内网 PoC 建议
+
+| 阶段 | 检查内容 | 成功标准 |
+| --- | --- | --- |
+| P0 官方核验 | 对比 Matomo 版本、插件兼容性、Skill 文件与 README | 能说明哪些能力在当前版本真实存在 |
+| P1 只读查询 | 使用官方 MCP 获取站点访问统计 | Claude Code 可列工具并正确返回数值 |
+| P2 权限与安全 | 访问 Token、OAuth2、Keycloak、Proxy、ROSA Route、TLS | 最小权限、可审计、不泄露凭据 |
+| P3 数据分析 | 网站访问/来源/转化报告 | Claude Code 结果与 Matomo UI/Reporting API 可核对 |
+| P4 CI 集成 | 将 code quality/test/review Skills 对接 GitLab CI | 能读取实际执行结果而不依赖 Github Actions |
+| P5 管理写操作 | Segment 更新、Raw API | 独立审批、明确回滚、安全设置审核 |
+
+针对公司环境：Claude Code 每日使用、GitLab CI、Nexus 镜像及依赖代理、公司 Proxy、ROSA 和 Keycloak。应优先试只读 MCP，不宜直接启用通用原始 API 执行工具。
+
+## 8. 待确认清单
+
+- [ ]  当前官方仓库真实的 `SKILL.md` 数量和列表，是否有完整 Claude Code 安装示例
+- [ ]  MCP Server 官方插件的正式版本、Matomo 兼容矩阵和客户端成功运行记录
+- [ ]  MCP 的真实工具列表、读写权限和默认开关
+- [ ]  OAuth2/Bearer Token、Keycloak 与企业代理的实际兼容性
+- [ ]  Matomo CI 相关 Skills 是否可以脱离 GitHub Actions 直接用于 GitLab CI
+- [ ]  是否适合将 Matomo 的 Web Analytics 和 Microcks/Apicurio 的测试与 API 治理数据共同做报告
+
+**当前建议：业务数据分析先试官方 MCP；Matomo 插件源码测试/审查再按需选官方 Skills。**
